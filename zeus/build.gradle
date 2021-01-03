@@ -1,0 +1,5 @@
+dependencies {
+    compileOnly group: "com.github.maxopoly", name: "zeus", version: "1.0"
+    implementation project(":nuvotifier-api")
+    implementation project(":nuvotifier-common")
+}

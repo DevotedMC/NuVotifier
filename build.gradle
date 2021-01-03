@@ -18,6 +18,7 @@ subprojects {
     sourceCompatibility = 1.8
 
     repositories {
+        mavenLocal()
         mavenCentral()
         maven {
             url "https://hub.spigotmc.org/nexus/content/repositories/snapshots"
@@ -30,6 +31,9 @@ subprojects {
         }
         maven {
             url "https://repo.velocitypowered.com/snapshots/"
+        }
+        maven {
+            url "https://build.devotedmc.com/plugin/repository/everything/"
         }
     }
 
