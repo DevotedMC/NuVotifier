@@ -6,6 +6,7 @@ import com.github.maxopoly.zeus.ZeusMain;
 import com.github.maxopoly.zeus.model.yaml.ConfigSection;
 import com.github.maxopoly.zeus.plugin.ZeusLoad;
 import com.github.maxopoly.zeus.plugin.ZeusPlugin;
+import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import com.vexsoftware.votifier.VoteHandler;
 import com.vexsoftware.votifier.model.Vote;
 import com.vexsoftware.votifier.net.VotifierServerBootstrap;
@@ -14,15 +15,24 @@ import com.vexsoftware.votifier.net.protocol.v1crypto.RSAIO;
 import com.vexsoftware.votifier.net.protocol.v1crypto.RSAKeygen;
 import com.vexsoftware.votifier.platform.LoggingAdapter;
 import com.vexsoftware.votifier.platform.VotifierPlugin;
+import com.vexsoftware.votifier.platform.scheduler.ScheduledExecutorServiceVotifierScheduler;
 import com.vexsoftware.votifier.platform.scheduler.VotifierScheduler;
+import com.vexsoftware.votifier.util.IOUtil;
 import com.vexsoftware.votifier.util.KeyCreator;
 import com.vexsoftware.votifier.util.TokenUtil;
 
+import java.io.ByteArrayInputStream;
 import java.io.File;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
 import java.security.Key;
 import java.security.KeyPair;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 @ZeusLoad(name = "NuVotifier", version = "@version@", description = "Vote listener plugin for the central authority program Zeus.")
 public class NuVotifier extends ZeusPlugin implements VoteHandler, VotifierPlugin {
@@ -39,15 +49,30 @@ public class NuVotifier extends ZeusPlugin implements VoteHandler, VotifierPlugi
     private Map<String, Key> tokens = new HashMap<>();
     private VotifierScheduler scheduler;
     private LoggingAdapter pluginLogger;
+    private ExecutorService eventExecutor = Executors.newCachedThreadPool(new ThreadFactoryBuilder().setNameFormat("Votifier Event Thread #%d").build());
 
     @Override
     public boolean onEnable() {
         instance = this;
 
-        //TODO make a getCommandHandler method and register our commands here
+        scheduler = new ScheduledExecutorServiceVotifierScheduler(Executors.newScheduledThreadPool(1, new ThreadFactoryBuilder().setNameFormat("Votifier Scheduler Thread #%d").build()));
+        pluginLogger = new Log4jLogger(logger);
+
         registerPluginlistener(new KiraPublishVoteListener());
 
-        return loadAndBind();
+        try {
+            loadAndBind();
+            return true;
+        } catch (Exception ex) {
+            try {
+                halt();
+                logger.error("On enable, there was a problem with the configuration. Votifier currently does nothing!", ex);
+            } catch (Exception ex2) {
+                logger.error("On enable, there was a problem loading, and we could not re-halt the server. Votifier is in an unstable state!", ex);
+                logger.error("(halt exception)", ex2);
+            }
+            return false;
+        }
     }
 
     @Override
@@ -55,7 +80,7 @@ public class NuVotifier extends ZeusPlugin implements VoteHandler, VotifierPlugi
         halt();
     }
 
-    public boolean loadAndBind() {
+    public void loadAndBind() {
         if (!getDataFolder().exists()) {
             if (!getDataFolder().mkdir()) {
                 throw new RuntimeException("Unable to create the plugin data folder " + getDataFolder());
@@ -63,18 +88,24 @@ public class NuVotifier extends ZeusPlugin implements VoteHandler, VotifierPlugi
         }
 
         // Handle configuration.
-        ConfigSection config = getConfig().getConfig();
+        File config = new File(getDataFolder() , "config.yml");
         File rsaDirectory = new File(getDataFolder() , "rsa");
-        getConfig().saveDefaultConfig();
+        ConfigSection configuration;
 
-        if (true) { //TODO fix this
+        if (!config.exists()) {
             try {
                 // First time run - do some initialization.
                 logger.info("Configuring Votifier for the first time...");
 
+                // Initialize the configuration file.
+                if (!config.createNewFile()) {
+                    throw new IOException("Unable to create the config file at " + config);
+                }
+
+                String cfgStr = new String(IOUtil.readAllBytes(getClass().getClassLoader().getResourceAsStream("zeusConfig.yml")), StandardCharsets.UTF_8);
                 String token = TokenUtil.newToken();
-                config.getConfigSection("tokens").putString("default", token);
-                getConfig().saveConfig();
+                cfgStr = cfgStr.replace("%default_token%", token);
+                Files.copy(new ByteArrayInputStream(cfgStr.getBytes(StandardCharsets.UTF_8)), config.toPath(), StandardCopyOption.REPLACE_EXISTING);
 
                 /*
                  * Remind hosted server admins to be sure they have the right
@@ -99,6 +130,10 @@ public class NuVotifier extends ZeusPlugin implements VoteHandler, VotifierPlugi
             }
         }
 
+        // Load the configuration.
+        getConfig().reloadConfig();
+        configuration = getConfig().getConfig();
+
         /*
          * Create RSA directory and keys if it does not exist; otherwise, read
          * keys.
@@ -118,7 +153,7 @@ public class NuVotifier extends ZeusPlugin implements VoteHandler, VotifierPlugi
         }
 
         // Load Votifier tokens.
-        ConfigSection tokenSection = config.getConfigSection("tokens");
+        ConfigSection tokenSection = configuration.getConfigSection("tokens");
 
         if (tokenSection != null) {
             for (String s : tokenSection.dump().keySet()) {
@@ -127,7 +162,7 @@ public class NuVotifier extends ZeusPlugin implements VoteHandler, VotifierPlugi
             }
         } else {
             String token = TokenUtil.newToken();
-            config.createConfigSection("tokens").putString("default", token);
+            configuration.createConfigSection("tokens").putString("default", token);
             tokens.put("default", KeyCreator.createKeyFrom(token));
             getConfig().saveConfig();
             logger.info("------------------------------------------------------------------------------");
@@ -139,18 +174,18 @@ public class NuVotifier extends ZeusPlugin implements VoteHandler, VotifierPlugi
         }
 
         // Initialize the receiver.
-        final String host = config.getString("host", "0.0.0.0");
-        final int port = config.getInt("port", 8192);
+        final String host = configuration.getString("host", "0.0.0.0");
+        final int port = configuration.getInt("port", 8192);
 
-        if (config.hasBoolean("quiet"))
-            debug = !config.getBoolean("quiet");
+        if (configuration.hasBoolean("quiet"))
+            debug = !configuration.getBoolean("quiet");
         else
-            debug = config.getBoolean("debug", true);
+            debug = configuration.getBoolean("debug", true);
 
         if (!debug)
             logger.info("QUIET mode enabled!");
 
-        final boolean disablev1 = config.getBoolean("disable-v1-protocol", false);
+        final boolean disablev1 = configuration.getBoolean("disable-v1-protocol", false);
         if (disablev1) {
             logger.info("------------------------------------------------------------------------------");
             logger.info("Votifier protocol v1 parsing has been disabled. Most voting websites do not");
@@ -160,8 +195,6 @@ public class NuVotifier extends ZeusPlugin implements VoteHandler, VotifierPlugi
 
         this.bootstrap = new VotifierServerBootstrap(host, port, this, disablev1);
         this.bootstrap.start(err -> {});
-
-        return true;
     }
 
     public void halt() {
@@ -229,7 +262,7 @@ public class NuVotifier extends ZeusPlugin implements VoteHandler, VotifierPlugi
             }
         }
 
-        ZeusMain.getInstance().getEventManager().broadcast(new VotifierEvent(vote)); //TODO add and use a scheduler from Zeus
+        eventExecutor.submit(() -> ZeusMain.getInstance().getEventManager().broadcast(new VotifierEvent(vote)));
     }
 
     @Override

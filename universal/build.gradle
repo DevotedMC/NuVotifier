@@ -51,6 +51,7 @@ dependencies {
     implementation project(":nuvotifier-bungeecord")
     implementation project(":nuvotifier-sponge")
     implementation project(":nuvotifier-velocity")
+    implementation project(":nuvotifier-zeus")
 }
 
 shadowJar {

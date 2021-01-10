@@ -8,8 +8,6 @@ import com.vexsoftware.votifier.model.Vote;
 import com.vexsoftware.votifier.net.VotifierSession;
 import com.vexsoftware.votifier.util.ArgsToVote;
 
-import java.awt.TextComponent;
-
 @ZCommand(
         description = "Trigger vote listeners with a test vote",
         altIds = "testvote",

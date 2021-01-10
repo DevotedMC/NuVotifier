@@ -2,7 +2,7 @@
 import org.apache.tools.ant.filters.ReplaceTokens
 
 plugins {
-    id "com.github.spotbugs" version "4.2.4" apply false
+//    id "com.github.spotbugs" version "4.2.4" apply false
     id "net.kyori.blossom" version "1.1.0" apply false
 }
 
@@ -13,7 +13,7 @@ allprojects {
 
 subprojects {
     apply plugin: 'java'
-    apply plugin: "com.github.spotbugs"
+//    apply plugin: "com.github.spotbugs"
 
     sourceCompatibility = 1.8
 
@@ -52,13 +52,13 @@ subprojects {
         useJUnitPlatform()
     }
 
-    tasks.withType(com.github.spotbugs.snom.SpotBugsTask) {
-        reports {
-            html {
-                enabled = true
-                destination = file("$buildDir/reports/spotbugs/main/spotbugs.html")
-                stylesheet = 'fancy-hist.xsl'
-            }
-        }
-    }
+//    tasks.withType(com.github.spotbugs.snom.SpotBugsTask) {
+//        reports {
+//            html {
+//                enabled = true
+//                destination = file("$buildDir/reports/spotbugs/main/spotbugs.html")
+//                stylesheet = 'fancy-hist.xsl'
+//            }
+//        }
+//    }
 }
